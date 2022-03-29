@@ -74,5 +74,8 @@ Resources:
                 Action:
                   - codebuild:BatchGetBuilds
                   - codebuild:StartBuild
+                  - codestar-connections:UseConnection
+                  - codestar-connections:GetConnection
+                  - codestar-connections:ListConnections
                 Resource:
                   - !Sub 'arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:*'           
