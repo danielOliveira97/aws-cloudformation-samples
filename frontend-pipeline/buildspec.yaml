@@ -1,0 +1,28 @@
+version: 0.2
+env:
+    variables:
+        CACHE_CONTROL: "86400"
+        S3_BUCKET: {-INSERT BUCKET NAME FOR STATIC WEBSITE HERE-}
+        BUILD_FOLDER: {-INSERT THE NAME OF THE BUILD FOLDER HERE-}
+        BUILD_ENV: "prod"
+phases:
+    install:
+        runtime-versions:
+            nodejs: 12
+        commands:
+            - echo Installing source NPM dependencies...
+            - npm install
+            - npm install -g @angular/cli
+    build:
+        commands:
+            - echo Build started on `date`
+            - ng build --${BUILD_ENV}
+    post_build:
+         commands:
+            - aws s3 sync ${BUILD_FOLDER} s3://${S3_BUCKET}"
+            - echo Build completed on `date`
+artifacts:
+    files:
+        - '**/*'
+    base-directory: 'dist*'
+    discard-paths: yes

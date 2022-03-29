@@ -1,0 +1,292 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Sample CloudFormation template with YAML - CodeBuild
+Parameters:
+  VPC:
+    Description: Choose the VPC for this EMR
+    Type: AWS::EC2::VPC::Id
+  Subnet1:
+    Description: Choose the private subnet 1
+    Type: AWS::EC2::Subnet::Id
+  Subnet2:
+    Description: Choose the private subnet 2
+    Type: AWS::EC2::Subnet::Id
+
+  KeyName:
+    Description: Choose the keypair to login
+    Type: AWS::EC2::KeyPair::KeyName
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  StackName:
+    Description: Target VPC Stack Name
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: ^[a-zA-Z][-a-zA-Z0-9]*$
+    Default: sample-cloudformation-vpc-1
+  CodeBuildProjectName:
+    Description: CI CodeBuild Project Name
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: ^[a-zA-Z][-a-zA-Z0-9]*$
+    Default: SampleCloudFormationCodeBuildCIBFF
+  CodeBuildCIBackendProjectName:
+    Description: CI CodeBuild Project Name
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: ^[a-zA-Z][-a-zA-Z0-9]*$
+    Default: SampleCloudFormationCodeBuildCIBackend
+
+Resources:
+  SampleCloudFormationCodeBuildBFF:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref CodeBuildCIBFFProjectName
+      Source:
+        Type: GITHUB
+        Location: https://github.com/debugroom/sample-aws-cloudformation.git
+        GitCloneDepth: 1
+        BuildSpec: bff-app/src/main/codebuild/dev/buildspec.yml
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: HEAD_REF
+#              Pattern: ^refs/heads/feature/.*
+              Pattern: ^refs/heads/master
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/standard:2.0
+        ComputeType: BUILD_GENERAL1_SMALL
+      ServiceRole: !Ref SampleCloudFormationCodeBuildBFFServiceRole
+      VpcConfig:
+        VpcId:
+          Fn::ImportValue: !Sub ${StackName}-VPCID
+        Subnets:
+          - Fn::ImportValue: !Sub ${StackName}-PrivateSubnet1
+          - Fn::ImportValue: !Sub ${StackName}-PrivateSubnet2
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub ${StackName}-SecurityGroupCodeBuild
+      Artifacts:
+        Type: NO_ARTIFACTS
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Sub ${CodeBuildCIBFFProjectName}-CloudWatchLogs-BuildLogGroup-Name
+
+  SampleCloudFormationCodeBuildBackend:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref CodeBuildCIBackendProjectName
+      Source:
+        Type: GITHUB
+        Location: https://github.com/debugroom/sample-aws-cloudformation.git
+        GitCloneDepth: 1
+        BuildSpec: backend-app/src/main/codebuild/dev/buildspec.yml
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: HEAD_REF
+#              Pattern: ^refs/heads/feature/.*
+              Pattern: ^refs/heads/master
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/standard:2.0
+        ComputeType: BUILD_GENERAL1_SMALL
+      ServiceRole: !Ref SampleCloudFormationCodeBuildBackendServiceRole
+      VpcConfig:
+        VpcId:
+          Fn::ImportValue: !Sub ${StackName}-VPCID
+        Subnets:
+          - Fn::ImportValue: !Sub ${StackName}-PrivateSubnet1
+          - Fn::ImportValue: !Sub ${StackName}-PrivateSubnet2
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub ${StackName}-SecurityGroupCodeBuild
+      Artifacts:
+        Type: NO_ARTIFACTS
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Sub ${CodeBuildCIBackendProjectName}-CloudWatchLogs-BuildLogGroup-Name
+
+
+  SampleCloudFormationCodeBuildBFFServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${CodeBuildCIBFFProjectName}-codebuild-base-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CodeBuildCIBFFProjectName}-CloudWatchLogs-BuildLogGroup-Name
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CodeBuildCIBFFProjectName}-CloudWatchLogs-BuildLogGroup-Name:*
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:s3:::codepipeline-${AWS::Region}-*
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+        - PolicyName: !Sub ${CodeBuildCIBFFProjectName}-codebuild-vpc-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - "*"
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeDhcpOptions
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                Action:
+                  - ec2:CreateNetworkInterfacePermission
+                Condition:
+                  StringEquals:
+                    ec2:Subnet:
+                      - Fn::ImportValue: !Sub ${StackName}-PrivateSubnet1Arn
+                      - Fn::ImportValue: !Sub ${StackName}-PrivateSubnet2Arn
+                    ec2:AuthorizedService: codebuild.amazonaws.com
+        - PolicyName: !Sub ${CodeBuildCIBFFProjectName}-ssm-parameterstore-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - "*"
+                Action:
+                  - ssm:DescribeParameters
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*
+                Action:
+                  - ssm:GetParameters
+
+  SampleCloudFormationCodeBuildBackendServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${CodeBuildCIBackendProjectName}-codebuild-base-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CodeBuildCIBackendProjectName}-CloudWatchLogs-BuildLogGroup-Name
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CodeBuildCIBackendProjectName}-CloudWatchLogs-BuildLogGroup-Name:*
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:s3:::codepipeline-${AWS::Region}-*
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+        - PolicyName: !Sub ${CodeBuildCIBackendProjectName}-codebuild-vpc-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - "*"
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeDhcpOptions
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                Action:
+                  - ec2:CreateNetworkInterfacePermission
+                Condition:
+                  StringEquals:
+                    ec2:Subnet:
+                      - Fn::ImportValue: !Sub ${StackName}-PrivateSubnet1Arn
+                      - Fn::ImportValue: !Sub ${StackName}-PrivateSubnet2Arn
+                    ec2:AuthorizedService: codebuild.amazonaws.com
+        - PolicyName: !Sub ${CodeBuildCIBackendProjectName}-ssm-parameterstore-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - "*"
+                Action:
+                  - ssm:DescribeParameters
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*
+                Action:
+                  - ssm:GetParameters
+
+Outputs:
+  SampleCloudFormationCodeBuildBFF:
+    Description: CI CodeBuild Project for BFF
+    Value: !Ref SampleCloudFormationCodeBuildBFF
+    Export:
+      Name: !Sub ${StackName}-CodeBuildBFF
+
+  SampleCloudFormationCodeBuildBackend:
+    Description: CI CodeBuild Project for Backend
+    Value: !Ref SampleCloudFormationCodeBuildBackend
+    Export:
+      Name: !Sub ${StackName}-CodeBuildBackend

@@ -1,0 +1,258 @@
+Description: CodePipeline
+Parameters:
+  ClusterName:
+    Type: String
+
+  ProjectName:
+    Type: String
+
+  BitbucketAppRepo:
+   Type: String
+
+  BitbucketAppBranch:
+    Type: String
+
+  BitbucketInfraBranch:
+    Type: String
+
+  EnvironmentName:
+    Type: String
+
+Resources:
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      RoleName: !Sub cfn-${AWS::StackName}
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "cloudformation.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - ecs:*
+                  - ecr:*
+                  - iam:*
+                  - application-autoscaling:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - route53:*
+                  - ssm:*
+                  - secretsmanager:*
+                  - cloudfront:*
+              - Resource: !Sub arn:aws:s3:::*
+                Effect: Allow
+                Action:
+                  - s3:*
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub cb-${AWS::StackName}
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "codebuild.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - iam:AttachRolePolicy
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                  - iam:GetRole
+                  - iam:DetachRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:PassRole
+                  - iam:DeleteRole
+                  - iam:TagRole
+                  - cloudformation:*
+                  - ec2:*
+                  - lambda:*
+                  - route53:*
+                  - ecr:*
+                  - ssm:*
+                  - s3:*
+                  - cloudfront:*
+              - Resource: !Sub arn:aws:s3:::*
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - kms:*
+  
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub cp-${AWS::StackName}
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "codepipeline.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                  - cloudformation:*
+                  - cloudwatch:*
+                  - events:*
+                  - iam:PassRole
+                  - secretsmanager:*
+                  - ec2:*
+                  - cloudfront:*
+                  - s3:*
+                  - codestar-connections:*
+              - Resource:
+                  - !Sub arn:aws:s3:::*
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+  
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties: 
+      BucketName: !Sub ${ClusterName}-artifact-${ProjectName}
+  
+  CodeBuildAppBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${ClusterName}-codebuild-${ProjectName}
+      ServiceRole: !Ref CodeBuildServiceRole
+      Artifacts:
+        Location: !Ref ArtifactBucket
+        Type: "S3"
+      Source:
+        Location: !Sub ${ArtifactBucket}/source.zip
+        Type: "S3"
+        BuildSpec: |
+          version: 0.2
+          env:
+              variables:
+                  CACHE_CONTROL: "86400"
+                  S3_BUCKET: {-INSERT BUCKET NAME FOR STATIC WEBSITE HERE-}
+                  BUILD_FOLDER: {-INSERT THE NAME OF THE BUILD FOLDER HERE-}
+                  BUILD_ENV: "prod"
+          phases:
+              install:
+                  runtime-versions:
+                    nodejs: 12
+                  commands:
+                      - echo Installing source NPM dependencies...
+                      - npm install
+                      - npm install -g @angular/cli
+              build:
+                  commands:
+                      - echo Build started on `date`
+                      - ng build --${BUILD_ENV}
+              post_build:
+                  commands:
+                      - aws s3 cp ${BUILD_FOLDER} s3://${S3_BUCKET} --recursive --acl public-read --cache-control "max-age=${CACHE_CONTROL}"
+                      - echo Build completed on `date`
+          artifacts:
+              files:
+                  - '**/*'
+              base-directory: 'dist*'
+              discard-paths: yes          
+      Environment:
+        ComputeType: "BUILD_GENERAL1_SMALL"
+        Image: "aws/codebuild/standard:5.0"
+        Type: "LINUX_CONTAINER"
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: BUCKET_NAME
+            Value: !Ref ArtifactBucket
+          - Name: REGION
+            Value: !Sub ${AWS::Region}
+          - Name: PROJECT_NAME
+            Value: !Ref ProjectName
+          - Name: CLUSTER_NAME
+            Value: !Ref ClusterName
+          - Name: ENVIRONMENT_NAME
+            Value: !Ref EnvironmentName
+  
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub ${ClusterName}-codepipeline-${ProjectName}
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: App
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeStarSourceConnection
+              Configuration:
+                ConnectionArn: arn:aws:codestar-connections:us-west-2:064916703952:connection/927a5706-5684-40c0-a3d9-ccd70ed4ca96
+                FullRepositoryId: !Sub philanthropi/${BitbucketAppRepo}
+                BranchName: !Ref BitbucketAppBranch
+                DetectChanges: false
+              OutputArtifacts:
+                - Name: App
+              RunOrder: 1
+        - Name: AppBuild
+          Actions:
+            - Name: BuildApplication
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildAppBuild
+                PrimarySource: App
+              InputArtifacts:
+                - Name: App
+                - Name: Infra
+              RunOrder: 1
+Outputs:
+  PipelineUrl:
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}

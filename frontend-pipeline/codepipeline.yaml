@@ -1,0 +1,136 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: CodePipeline for continuous integration and continuous deployment
+
+Parameters:
+  Environment:
+    Type: String
+    Default: Development
+    Description: Name of the Project
+  ProjectName:
+    Type: String
+    Description: Name of the Project
+  GitHubRep:
+    Type: String
+    Description: Name of the GitHub Repository
+  GitHubUser:
+    Type: String
+    Description: Name of the GitHub User
+  GitHubBranch:
+    Type: String
+    Description: Name of the GitHub Branch
+  BuildDockerImage:
+    Type: String
+    Default: aws/codebuild/standard:5.0
+    Description: Docker image to use for the build phase
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Description: Codebuild role ARN
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Description: Codepipeline role ARN
+  VPC:
+    Description: Choose the VPC for this EMR
+    Type: AWS::EC2::VPC::Id
+  Subnet1:
+    Description: Choose the private subnet 1
+    Type: AWS::EC2::Subnet::Id
+  Subnet2:
+    Description: Choose the private subnet 2
+    Type: AWS::EC2::Subnet::Id
+  SecurityGroup:
+    Description: Choose the VPC security group
+    Type: AWS::EC2::SecurityGroup::Id
+
+Resources:
+  PipelineS3Bucket:
+    Type: AWS::S3::Bucket
+
+  BuildAndDeploy:
+    Type: AWS::CodeBuild::Project
+    Properties: 
+      Name: !Sub '${ProjectName}-codebuild'
+      Artifacts:
+        Type: CODEPIPELINE
+        EncryptionDisabled: true
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+          - Name: ENVIRONMENT
+            Type: PLAINTEXT
+            Value: staging
+        Image: !Ref DeployDockerImage
+        Type: LINUX_CONTAINER
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.yml
+      VpcConfig:
+        VpcId: !Ref VPC
+        Subnets:
+          - !Ref Subnet1
+          - !Ref Subnet2
+        SecurityGroupIds: !Ref SecurityGroup
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Sub ${ProjectName}-CloudWatchLogs-BuildLogGroup-${Environment}
+
+  CodeStarConnection:
+    Type: 'AWS::CodeStarConnections::Connection'
+    Properties:
+      ConnectionName: !Sub ${ProjectName}GitHubConnection
+      ProviderType: GitHubEnterpriseServer
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineS3Bucket
+      RestartExecutionOnUpdate: false
+      RoleArn: !Ref PipelineRole
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: App
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeStarSourceConnection
+              Configuration:
+                ConnectionArn: !Ref CodeStarConnection
+                BranchName: !Ref GitHubBranch
+                FullRepositoryId: !Sub ${GitHubUser}/${GitHubRep}
+              OutputArtifacts:
+                - Name: Source
+              RunOrder: 1
+        - Name: !Sub ${Environment}
+          Actions:
+            - Name: BuildAndDeploy
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName : !Ref BuildAndDeploy
+              InputArtifacts:
+                - Name: Source
+              OutputArtifacts:
+                - Name: !Sub ${Environment}Build
+              RunOrder: 1
+
+Outputs:
+  CodeBuild:
+    Description: Name associated with CodeBuild projects
+    Value: !Ref BuildAndDeploy
+    Export:
+      Name: !Sub '${AWS::StackName}CodeBuild'
+  CodePipeline:
+    Description: Name associated with Codepipeline projects
+    Value: !Ref Pipeline
+    Export:
+      Name: !Sub '${AWS::StackName}CodePipeline'
