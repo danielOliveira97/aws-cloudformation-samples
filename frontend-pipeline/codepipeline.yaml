@@ -25,7 +25,7 @@ Parameters:
     Default: aws/codebuild/standard:5.0
     Description: Docker image to use for the build phase
   CodeBuildRole:
-    Type: AWS::IAM::Role
+    Type: String
     Description: Codebuild role ARN
   PipelineRole:
     Type: String
