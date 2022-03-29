@@ -28,20 +28,20 @@ Parameters:
     Type: AWS::IAM::Role
     Description: Codebuild role ARN
   PipelineRole:
-    Type: AWS::IAM::Role
+    Type: String
     Description: Codepipeline role ARN
   VPC:
     Description: Choose the VPC for this EMR
-    Type: AWS::EC2::VPC::Id
+    Type: String
   Subnet1:
     Description: Choose the private subnet 1
-    Type: AWS::EC2::Subnet::Id
+    Type: String
   Subnet2:
     Description: Choose the private subnet 2
-    Type: AWS::EC2::Subnet::Id
+    Type: String
   SecurityGroup:
     Description: Choose the VPC security group
-    Type: AWS::EC2::SecurityGroup::Id
+    Type: String
 
 Resources:
   PipelineS3Bucket:
@@ -56,11 +56,7 @@ Resources:
         EncryptionDisabled: true
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
-        EnvironmentVariables:
-          - Name: ENVIRONMENT
-            Type: PLAINTEXT
-            Value: staging
-        Image: !Ref DeployDockerImage
+        Image: !Ref BuildDockerImage
         Type: LINUX_CONTAINER
       ServiceRole: !Ref CodeBuildRole
       Source:
