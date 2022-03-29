@@ -29,8 +29,7 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                 Resource:
-                  - !GetAtt PipelineS3Bucket.Arn
-                  - !Sub '${PipelineS3Bucket.Arn}/*'
+                  - !Sub 'arn:aws:s3:${AWS::Region}:${AWS::AccountId}:*'
         - PolicyName: CanAccessS3
           PolicyDocument: 
             Version: 2012-10-17
@@ -39,7 +38,7 @@ Resources:
                 Action:
                   - s3:GetObject
                 Resource:
-                  - !GetAtt PipelineS3Bucket.Arn
+                  - !Sub 'arn:aws:s3:${AWS::Region}:${AWS::AccountId}:*'
 
   PipelineRole:
     Type: AWS::IAM::Role
@@ -52,19 +51,6 @@ Resources:
               Service: [codepipeline.amazonaws.com]
             Action: ['sts:AssumeRole']
       Policies:
-        - PolicyName: CanAccessCodeCommit
-          PolicyDocument: 
-            Version: 2012-10-17
-            Statement: 
-              - Effect: Allow
-                Action:
-                  - codecommit:GetBranch
-                  - codecommit:GetCommit
-                  - codecommit:UploadArchive
-                  - codecommit:GetUploadArchiveStatus
-                Resource:
-                  - !Sub 'arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${RepositoryName}'
-                  - !Sub 'arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${RepositoryName}/*'
         - PolicyName: CanAccessS3
           PolicyDocument: 
             Version: 2012-10-17
@@ -83,14 +69,10 @@ Resources:
                   - s3:PutObjectAcl
                   - s3:DeleteObject
                 Resource:
-                  - !GetAtt PipelineS3Bucket.Arn
-                  - !Sub '${PipelineS3Bucket.Arn}/*'
+                  - !Sub 'arn:aws:s3:${AWS::Region}:${AWS::AccountId}:*'
               - Effect: Allow
                 Action:
                   - codebuild:BatchGetBuilds
                   - codebuild:StartBuild
                 Resource:
-                  - !GetAtt StagingBuild.Arn
-                  - !GetAtt StagingDeploy.Arn
-                  - !GetAtt ProductionBuild.Arn
-                  - !GetAtt ProductionDeploy.Arn                  
+                  - !Sub 'arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:*'           
