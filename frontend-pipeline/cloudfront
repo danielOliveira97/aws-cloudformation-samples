@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Some description for this stack
+
+# ---------- Parameters -------------------------------------------------------
+Parameters:
+  CertificateArn:
+    Type: String
+    Default: ''
+    Description: Certificate must be created before CloudFormation stack so the value is fixed
+  BucketName:
+    Type: String
+    Default: ''
+  DomainName:
+    Type: String
+    Default: ''
+
+# ---------- Resources lists --------------------------------------------------
+Resources:
+  CDNOriginIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub "Cloudfront Origin identity for ${DomainName}"
+
+  S3Hosting:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CDN:
+    Type: "AWS::CloudFront::Distribution"
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Ref DomainName
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          ForwardedValues:
+            QueryString: True
+          TargetOriginId: !Sub "S3-origin-${S3Hosting}"
+          ViewerProtocolPolicy: redirect-to-https
+        DefaultRootObject: index.html
+        Enabled: True
+        HttpVersion: http2
+        IPV6Enabled: True
+        Origins:
+          - DomainName: !GetAtt S3Hosting.RegionalDomainName
+            Id: !Sub "S3-origin-${S3Hosting}"
+            # OriginPath: /some-folder
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CDNOriginIdentity}"
+        PriceClass: PriceClass_100 # PriceClass_100 / PriceClass_200 / PriceClass_All
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          MinimumProtocolVersion: TLSv1.2_2021
+          SslSupportMethod: sni-only
+
+  S3HostingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Hosting
+      PolicyDocument:
+        Statement:
+          - Action:
+              - "s3:GetObject"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CDNOriginIdentity}"
+            Resource: !Sub "arn:aws:s3:::${S3Hosting}/*"
+        Version: "2012-10-17"
+
+Outputs:
+  CloudFrontID:
+    Value: !Ref CDN
+    Description: CloudFront ID
+  CloudFrontURL:
+    Value: !GetAtt CDN.DomainName
+    Description: CloudFront URL for updating DNS record
