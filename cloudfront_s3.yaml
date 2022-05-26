@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Some description for this stack
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: "mfe-portal-admin"
+# ---------- Mappings -------------------------------------------------------
+Mappings:
+  AWSAccount:
+    "231189024825":
+      Environment: dev
+      CertificateArn: arn:aws:acm:us-east-1:231189024825:certificate/97934951-4921-435c-8c59-7be2f399f047
+      DNS: banking.dev.btg.cloud 
+
+    "780671579312":
+      Environment: uat
+      CertificateArn: arn:aws:acm:us-east-1:780671579312:certificate/40ba9a3a-caf0-4172-bfb0-0440d2a1bbdf
+      DNS: uat.btgbank.com
+
+    "493010814028":
+      Environment: prd
+      CertificateArn: arn:aws:acm:us-east-1:493010814028:certificate/4e8caaeb-2fa4-4870-a3aa-c9930c7a5d29
+      DNS: btgbank.com
+
+# ---------- Resources lists --------------------------------------------------
+Resources:
+  CDNOriginIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Join ["-", [!Sub "Cloudfront Origin identity for ${BucketName}", !FindInMap [AWSAccount, !Ref "AWS::AccountId", Environment]]]
+
+  S3Hosting:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join ["-", [!Sub "${BucketName}", !FindInMap [AWSAccount, !Ref "AWS::AccountId", Environment]]]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CDN:
+    Type: "AWS::CloudFront::Distribution"
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Join [".", ["!Sub "${BucketName}", !FindInMap [AWSAccount, !Ref "AWS::AccountId", DNS]]]
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          ForwardedValues:
+            QueryString: True
+          TargetOriginId: !Sub "S3-origin-${S3Hosting}"
+          ViewerProtocolPolicy: redirect-to-https
+        DefaultRootObject: index.html
+        Enabled: True
+        HttpVersion: http2
+        IPV6Enabled: True
+        Origins:
+          - DomainName: !GetAtt S3Hosting.RegionalDomainName
+            Id: !Sub "S3-origin-${S3Hosting}"
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CDNOriginIdentity}"
+        PriceClass: PriceClass_100 # PriceClass_100 / PriceClass_200 / PriceClass_All
+        ViewerCertificate:
+          AcmCertificateArn: !FindInMap [AWSAccount, !Ref "AWS::AccountId", CertificateArn]
+          MinimumProtocolVersion: TLSv1.2_2021
+          SslSupportMethod: sni-only
+
+  S3HostingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Hosting
+      PolicyDocument:
+        Statement:
+          - Action:
+              - "s3:GetObject"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CDNOriginIdentity}"
+            Resource: !Sub "arn:aws:s3:::${S3Hosting}/*"
+          - Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:PutObjectAcl"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Resource: !Sub "arn:aws:s3:::${S3Hosting}/*"
+        Version: "2012-10-17"
+
+Outputs:
+  CloudFrontID:
+    Value: !Ref CDN
+    Description: CloudFront ID
+  CloudFrontURL:
+    Value: !GetAtt CDN.DomainName
+    Description: CloudFront URL for updating DNS record
