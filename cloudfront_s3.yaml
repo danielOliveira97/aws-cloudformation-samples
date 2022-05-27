@@ -29,12 +29,22 @@ Resources:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
     Properties:
       CloudFrontOriginAccessIdentityConfig:
-        Comment: !Join ["-", [!Sub "Cloudfront Origin identity for ${BucketName}", !FindInMap [AWSAccount, !Ref "AWS::AccountId", Environment]]]
+        Comment: !Join ["-", [!Sub "Cloudfront Origin identity for ${BucketName}", !FindInMap [AWSAccount, !Ref "AWS::AccountId", DNS]]]
 
-  S3Hosting:
+  S3HostingMain:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Join ["-", [!Sub "${BucketName}", !FindInMap [AWSAccount, !Ref "AWS::AccountId", Environment]]]
+      BucketName: !Join [".", [!Sub "${BucketName}", !FindInMap [AWSAccount, !Ref "AWS::AccountId", DNS]]]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  S3HostingSta:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join ["-", [!Sub "${BucketName}-sta", !FindInMap [AWSAccount, !Ref "AWS::AccountId", Environment]]]
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -65,17 +75,24 @@ Resources:
         HttpVersion: http2
         IPV6Enabled: True
         Origins:
-          - DomainName: !GetAtt S3Hosting.RegionalDomainName
-            Id: !Sub "S3-origin-${S3Hosting}"
+
+          - DomainName: !GetAtt S3HostingMain.RegionalDomainName
+            Id: !Sub "S3-origin-${S3HostingMain}"
             S3OriginConfig:
               OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CDNOriginIdentity}"
+
+          - DomainName: !GetAtt S3HostingSta.RegionalDomainName
+            Id: !Sub "S3-origin-${S3HostingSta}"
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CDNOriginIdentity}"
+
         PriceClass: PriceClass_100 # PriceClass_100 / PriceClass_200 / PriceClass_All
         ViewerCertificate:
           AcmCertificateArn: !FindInMap [AWSAccount, !Ref "AWS::AccountId", CertificateArn]
           MinimumProtocolVersion: TLSv1.2_2021
           SslSupportMethod: sni-only
 
-  S3HostingBucketPolicy:
+  S3HostingMainBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
       Bucket: !Ref S3Hosting
@@ -96,6 +113,28 @@ Resources:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
             Resource: !Sub "arn:aws:s3:::${S3Hosting}/*"
         Version: "2012-10-17"
+
+  S3HostingStaBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3HostingSta
+      PolicyDocument:
+        Statement:
+          - Action:
+              - "s3:GetObject"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CDNOriginIdentity}"
+            Resource: !Sub "arn:aws:s3:::${S3HostingSta}/*"
+          - Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:PutObjectAcl"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Resource: !Sub "arn:aws:s3:::${S3HostingSta}/*"
+        Version: "2012-10-17"        
 
 Outputs:
   CloudFrontID:
